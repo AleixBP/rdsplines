@@ -1,0 +1,5 @@
+cupy >= 10.4.0
+numpy >= 1.21.2
+scipy >= 1.7.1
+matplotlib >= 3.5.0
+plt-wrapper >= 0.0.2
