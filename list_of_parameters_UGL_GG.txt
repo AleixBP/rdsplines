@@ -1,0 +1,52 @@
+#### Uniform-Gaussian-Laplacian (UGL)
+
+### Domain
+s_lim = 5
+t_lim = 20
+domain = np.array([[0, t_lim], [-s_lim, s_lim]])
+
+### Uniform 
+ux = css.uniform(loc=1.5, scale=t_lim/5)
+uy = css.uniform(loc=-s_lim+1.5, scale=s_lim/2)
+#U = ux * uy
+
+### Gaussian
+m = np.array([t_lim/2., -s_lim])
+cov = np.array([1., 4.]) # diagonal covariance
+G = multivariate_normal(mean = m, cov = cov)
+
+### Laplacian
+me = np.array([9*t_lim/10, s_lim/2])
+ce = np.array([3., 3.])
+ex = css.laplace(loc=me[0], scale=sqrt(ce[0]/2))
+ey = css.laplace(loc=me[1], scale=sqrt(ce[1]/2)) 
+#L = ex * ey
+
+### UGL SUM
+def pdf_eval(xys):
+    return G.pdf(xys) \
+           + ex.pdf(xys[...,0]) * ey.pdf(xys[...,1]) \
+           + ux.pdfxys[...,0]) * uy.pdf(xys[...,1])
+
+
+
+
+#### Gaussian-Gaussian (GG)
+s_lim = 5
+t_lim = 10
+domain = np.array([[0, t_lim], [-s_lim, s_lim]])
+
+### Gaussian 1
+m1 = np.array([t_lim/2., -s_lim]).get()
+cov1 = np.array([1., 4.]).get()
+g1 = css.multivariate_normal(mean = m1, cov = cov1)
+
+### Gaussian 2
+m2 = np.array([9*t_lim/10, s_lim/2]).get()
+cov2 = np.array([3., 3.]).get()
+g2 = css.multivariate_normal(mean = m2, cov = cov2)
+
+### GG SUM
+def pdf_eval(xys):
+        return g1.pdf(xys) + g2.pdf(xys)
+
