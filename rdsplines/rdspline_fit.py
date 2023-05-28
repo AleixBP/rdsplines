@@ -1,5 +1,5 @@
 import sys
-from logsplines import array_lib as np
+from rdsplines import array_lib as np
 import bs_utils as bu
 from descent_algorithms import APGD
 from bs_Hessian import bs_Hessian
