@@ -33,6 +33,30 @@ def generate_samples(nsamples, domain):
     return samples
 
 
+def generate_samples_3D(nsamples, domain):
+    t_lim = float(domain[0,1])
+    s_lim = float(domain[1,1])
+    z_lim = float(domain[2,1])
+    nsamples = int(nsamples)
+    nsamples_split = int(nsamples/2)
+    
+    # Gaussians
+    m1 = np.array([t_lim/2., -s_lim, 0.]).get(); cov1 = np.array([1., 4., 2.5]).get()
+    m2 = np.array([9*t_lim/10, s_lim/2, z_lim/2]).get(); cov2 = np.array([3., 3., 3.]).get()
+    g1 = css.multivariate_normal(mean = m1, cov = cov1)
+    g2 = css.multivariate_normal(mean = m2, cov = cov2)
+
+    samples1 = g1.rvs(nsamples-nsamples_split)
+    samples2 = g2.rvs(nsamples_split)
+    samples = np.vstack((samples1, samples2))
+    
+    def pdf_eval(xys):
+        pos = xys.get()
+        return g1.pdf(pos) + g2.pdf(pos)
+    
+    return samples, pdf_eval
+
+
 def adjust_samples_to_bcs(samples, domain, bcs, plot=False):
     domain_range = np.diff(domain)
     domain_offset = domain[:,0]
