@@ -267,7 +267,7 @@ class rdspline_likelihood:
         bbs_filters = overlapping_bs_filters_1d(self.deg, scale)
         #origin = int(len(bbs_filters[0]-1)/2)
         hessian_elements = []
-        #2D ONLY
+        
         if self.ndim==2:
             for filter_i in bbs_filters:
                 first_filtering = nd.convolve1d(self.values_on_grid, filter_i, mode=self.bcs[0], axis=0, origin=origin)
@@ -291,15 +291,23 @@ class rdspline_likelihood:
                         third_filtering = nd.convolve1d(second_filtering, filter_k, mode=self.bcs[2], axis=2, origin=origin)
                         third_filtering = downsample_coeffs(third_filtering, scale)/(self.density_integral * (scale**coeffs.ndim))
                         hessian_elements.append(third_filtering)
-
-        # Should add recursion
-        # hessian_elements2 = []  
-        # import itertools
-        # nth_filtering = self.values_on_grid.copy()
-        # for xyz in itertools.product(a, repeat=self.ndim):
-        #     for i in xyz:
-        #         nth_filtering = nd.convolve1d(nth_filtering, filter_j, mode=self.bcs[1], axis=1, origin=origin)
-
+                        
+        else:
+            
+            def recursion_for(ind, n_filtering):
+            
+                if ind<self.ndim-1:
+                    for filter_i in bbs_filters:
+                        m_filtering = nd.convolve1d(n_filtering, filter_i, mode=self.bcs[ind], axis=ind, origin=origin)
+                        recursion_for(ind+1, m_filtering)
+                else:
+                    for filter_k in bbs_filters:
+                            m_filtering = nd.convolve1d(n_filtering, filter_k, mode=self.bcs[ind], axis=ind, origin=origin)
+                            m_filtering = downsample_coeffs(m_filtering, scale)/(self.density_integral * (scale**coeffs.ndim))
+                            hessian_elements.append(m_filtering)
+        
+            recursion_for(0, self.values_on_grid.copy())
+            
         return np.array(hessian_elements)
 
     def update_lip(self, *args):#, approx=False, **kwargs):
