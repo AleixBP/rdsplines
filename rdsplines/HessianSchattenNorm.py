@@ -32,9 +32,13 @@ class LpSchattenNorm:
         self.proj_lq_ball = self.init_proj_lq_ball(self.q)
         self.flat = flat
         self.hermitian = hermitian if not flat else True
-        self.closed_formula = (((flat and hess_shape[-1] == 3)
-                                 or (not flat and hess_shape[-2:] == (2, 2)))
-                               and hermitian) # only 2D hermitian as of now
+        
+        if flat:
+            self.d2or3 = 2 if hess_shape[-1]==3 else 3 if hess_shape[-1]==6 else None
+        else:
+            self.d2or3 = 2 if hess_shape[-2:]==(2,2) else 3 if hess_shape[-2:]==(3,3) else None
+        
+        self.closed_formula = ((self.d2or3 is not None) and hermitian)
 
         self.flat_index_2d = (np.s_[..., 0], np.s_[..., 1], np.s_[..., 1], np.s_[..., -1], np.s_[:-1])
         self.erect_index_2d = (np.s_[...,0,0], np.s_[...,0,1], np.s_[...,1,0], np.s_[...,1,1], np.s_[:-2])
@@ -99,7 +103,10 @@ class LpSchattenNorm:
     def svd(self, mat_tensor, compute_basis = True, hermitian = False, flat = False, closed_formula = False):
 
         if closed_formula:
-            return self.svd_2d(mat_tensor, compute_basis = compute_basis, flat=flat)
+            if self.d2or3==2:
+                return self.svd_2d(mat_tensor, compute_basis = compute_basis, flat=flat)
+            else:
+                return self.svd_3d(mat_tensor, compute_basis = compute_basis, flat=flat)
 
         else:
             if flat: mat_tensor = self.erect_symmetric_matrix(mat_tensor)
@@ -109,7 +116,10 @@ class LpSchattenNorm:
     def rebuild_svd(self, U, s, V, flat = False, closed_formula = False):
 
         if closed_formula:
-            rebuilt = self.rebuild_svd_2d(U, s, V)
+            if self.d2or3==2:
+                rebuilt = self.rebuild_svd_2d(U, s, V)
+            else:
+                rebuilt = self.rebuild_svd_3d(U, s, V)
             return rebuilt if flat else self.erect_symmetric_matrix(rebuilt)
 
         else:
@@ -151,10 +161,130 @@ class LpSchattenNorm:
         mat_tensor = np.zeros((*s.shape[:-1], 3))
         # if symmetric then eigenvecs are orthonormal so inverse of change of basis is just the transpose
         # also orthonormal in 2x2 means e_1,x = e_2,y, e_1,y = -e_2,x
+        
         mat_tensor[..., 0] = s[..., 0]*V[...,0]**2 + s[..., 1]*V[...,1]**2
         mat_tensor[..., 1] = (s[..., 0]-s[..., 1])*V[..., 0]*V[..., 1]
         mat_tensor[..., 2] = s[..., 0]*V[..., 1]**2 + s[..., 1]*V[...,0]**2
 
+        return mat_tensor
+    
+    # Onlc need to change the closed formula stuff in svd, rebuild_svd, and init
+    def svd_3d(self, mat_tensor, compute_basis = True, flat = False, tol=None):
+        if tol is None: tol=self.eps
+        # closed formula for 3x3 real symmetric matrices (complex hermitian should be possible too). 
+        # assuming flat
+        shape_out = (*mat_tensor.shape[:-1], 3) # hermit output shape
+        be_prudent = True
+        
+        a, b, c, d, e, f = mat_tensor[...,0], mat_tensor[...,2], mat_tensor[...,5], mat_tensor[...,1], mat_tensor[...,4], mat_tensor[...,3]
+        
+        tr = a + b + c
+        y = a*a + b*b + c*c - a*b -a*c -b*c + 3*(d*d + f*f + e*e)
+        z = -(2*a-b-c)*(2*b-a-c)*(2*c-a-b) \
+            + 9*( (2*a-b-c)*e*e + (2*b-a-c)*f*f + (2*c-a-b)*d*d  ) \
+            - 54*d*e*f
+        
+        sqy = np.sqrt(y)
+        phi = (np.pi/2)*np.ones_like(a)
+        
+        phi[z!=0] = np.arctan(np.sqrt(np.maximum(4*y[z!=0]**3 - z[z!=0]**2,0))/z[z!=0])
+        phi[z<0] += np.pi
+        
+        singvals = np.zeros(shape_out)
+        singvals[..., 1] = (tr - 2*sqy*np.cos(phi/3) )/3
+        singvals[..., 2] = (tr + 2*sqy*np.cos((phi-np.pi)/3) )/3
+        singvals[..., 0] = (tr + 2*sqy*np.cos((phi+np.pi)/3) )/3
+            
+        if compute_basis:
+                        
+            singvecs = np.zeros((*shape_out,3))
+        
+            fis0  = np.abs(f)<tol;
+
+            #with np.errstate(divide='ignore', invalid='ignore'):
+            for i in range(3): # for the three eigenvectors
+            
+                m = np.where(fis0,
+                                    (f*f - (c-singvals[..., i])*(a-singvals[..., i]))/(e*(a-singvals[..., i])-d*f),
+                                    (d*(c-singvals[..., i])-e*f)/(f*(b-singvals[..., i])-d*e)
+                                    )
+            
+                singvecs[..., i, 2] = 1
+                
+                singvecs[..., i, 1] = m
+                
+                singvecs[..., i, 0] = np.where(fis0,  (m*(singvals[..., i]-b) - e)/d, (singvals[..., i] - c - e*m)/f)                        
+        
+            if be_prudent:
+                
+                dis0 = np.abs(d)<tol; eis0 = np.abs(e)<tol
+                def0 = dis0 & fis0 & eis0; defnot0 = ~def0
+                df0 = dis0 & fis0 & defnot0
+                de0 = dis0 & eis0 & defnot0
+                ef0 = eis0 & fis0 & defnot0
+                
+                # put all potential nans to zero
+                singvecs[df0 | de0 | ef0 | def0, ...] = 0
+                
+                # already diag
+                singvecs[def0, 0, 0] = singvecs[def0, 1, 1] = singvecs[def0, 2, 2] = 1.
+                
+                # fill the one already-diagonal vector in semidiag matrices
+                singvecs[df0, 0, 0] =  singvecs[de0, 1, 1] =  singvecs[ef0, 2, 2] = 1.
+                
+                # first vector is diagonalized (df0)
+                # should i just call svd_2d? whatev
+                singvecs[df0, 1, 1] = -e[df0]
+                singvecs[df0, 1, 2] = b[df0]-singvals[df0, 1]
+                singvecs[df0, 2, 1] = -singvecs[df0, 1, 2]
+                singvecs[df0, 2, 2] = singvecs[df0, 1, 1]
+                
+                # second
+                singvecs[de0, 0, 0] = -f[de0]
+                singvecs[de0, 0, 2] = a[de0]-singvals[de0, 1]
+                singvecs[de0, 2, 0] = -singvecs[de0, 0, 2]
+                singvecs[de0, 2, 2] = singvecs[de0, 0, 0]
+                singvals[de0] = np.roll(singvals[de0],1)[:,::-1]
+                #not sure taking like this is general or i have to just recompute the singvals (eigenvals)
+                
+                #third
+                singvecs[ef0, 1, 0] = -d[ef0]
+                singvecs[ef0, 1, 1] = a[ef0]-singvals[ef0, 1]
+                singvecs[ef0, 0, 0] = -singvecs[ef0, 1, 1]
+                singvecs[ef0, 0, 1] = singvecs[ef0, 1, 0]
+                
+                     
+            singvecs = singvecs/np.linalg.norm(singvecs, axis=2)[:,:,np.newaxis]
+                    
+            return None, singvals, singvecs
+                
+        return singvals
+    
+    
+                
+    
+    def rebuild_svd_3d(self, U, s, V):
+        
+        # should i just compute the third by crossproduct?
+        mat_tensor = np.zeros((*s.shape[:-1], 6))
+
+        # Fill diagonal first [..., m,n], m is eigenvector index, n is component
+        mat_tensor[...,0] = s[..., 0]*V[..., 0, 0]**2 + s[..., 1]*V[..., 1, 0]**2 + s[..., 2]*V[..., 2, 0]**2
+        mat_tensor[...,2] = s[..., 0]*V[..., 0, 1]**2 + s[..., 1]*V[..., 1, 1]**2 + s[..., 2]*V[..., 2, 1]**2
+        mat_tensor[...,5] = s[..., 0]*V[..., 0, 2]**2 + s[..., 1]*V[..., 1, 2]**2 + s[..., 2]*V[..., 2, 2]**2
+        
+        # 1off diagonal
+        mat_tensor[...,1] = s[..., 0]*V[..., 0, 0]*V[..., 0, 1] + s[..., 1]*V[..., 1, 0]*V[..., 1, 1] + s[..., 2]*V[..., 2, 0]*V[..., 2, 1]
+        mat_tensor[...,4] = s[..., 0]*V[..., 0, 2]*V[..., 0, 1] + s[..., 1]*V[..., 1, 2]*V[..., 1, 1] + s[..., 2]*V[..., 2, 2]*V[..., 2, 1]
+        
+        # 2off diagonal
+        mat_tensor[...,3] = s[..., 0]*V[..., 0, 0]*V[..., 0, 2] + s[..., 1]*V[..., 1, 0]*V[..., 1, 2] + s[..., 2]*V[..., 2, 0]*V[..., 2, 2]
+        
+        # Wolfram input for multiplication (not same naming convention as elsewhere)
+        #[[a, b, c],[d, e, f],[g, h, i]]* [[j, 0, 0],[0, k, 0],[0, 0, l]] *[[a, d, g],[b, e, h],[c, f, i]]
+        
+        #if real eigens and orthogonal should be symmetric (?)
+        
         return mat_tensor
 
 
